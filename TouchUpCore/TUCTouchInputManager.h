@@ -48,6 +48,11 @@ NS_ASSUME_NONNULL_BEGIN
  */
 @property BOOL ignoreOriginTouches;
 
+/**
+ When a click is performed (tap, point-and-click, bring-to-front), restore the cursor to where it was before the touch moved it.
+ */
+@property BOOL restoreCursorAfterClick;
+
 
 - (void)start;
 

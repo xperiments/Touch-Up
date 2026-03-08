@@ -14,6 +14,7 @@
 @property CGPoint locationOfLastClick;
 
 @property BOOL isLeftMouseDown;
+@property BOOL isDraggingCursor;
 
 @property CGPoint momentumScrollTranslation;
 @property (strong) NSTimer *momentumScrollTimer;
@@ -51,6 +52,29 @@
     return location;
 }
 
+
+
+/**
+ Silently releases a mouseDown that was sent at TouchDown but the touch turned into a drag/scroll.
+ Uses clickState=0 so apps don't fire their primary action on this synthetic release.
+ Only acts when the button is down from a press (not a true drag).
+ */
+- (void)cancelPressAtLocation:(CGPoint)aLocation {
+    if (self.isLeftMouseDown && !self.isDraggingCursor) {
+        // Some controls still treat a plain down->up sequence as click, even with clickState=0.
+        // Emit a dragged event first so the interaction is classified as drag/scroll cancellation.
+        CGEventRef drag = CGEventCreateMouseEvent(NULL, kCGEventLeftMouseDragged, aLocation, kCGMouseButtonLeft);
+        CGEventSetIntegerValueField(drag, kCGMouseEventClickState, 0);
+        CGEventPost(kCGHIDEventTap, drag);
+        CFRelease(drag);
+
+        CGEventRef event = CGEventCreateMouseEvent(NULL, kCGEventLeftMouseUp, aLocation, kCGMouseButtonLeft);
+        CGEventSetIntegerValueField(event, kCGMouseEventClickState, 0);
+        CGEventPost(kCGHIDEventTap, event);
+        CFRelease(event);
+        self.isLeftMouseDown = NO;
+    }
+}
 
 
 - (void)moveCursorTo:(CGPoint)aLocation {
@@ -100,6 +124,35 @@
 }
 
 
+- (void)mouseDownAt:(CGPoint)aLocation {
+    // Pure press event – do NOT feed the double-click tracker.
+    // Always clickState=1; the click-count sequence is managed by performClickAt only.
+    CGEventRef event = CGEventCreateMouseEvent(NULL, kCGEventLeftMouseDown, aLocation, kCGMouseButtonLeft);
+    CGEventSetIntegerValueField(event, kCGMouseEventClickState, 1);
+    CGEventPost(kCGHIDEventTap, event);
+    CFRelease(event);
+
+    self.isLeftMouseDown = YES;
+    self.isDraggingCursor = NO;
+}
+
+
+- (void)mouseUpAt:(CGPoint)aLocation {
+    if (!self.isLeftMouseDown) { return; }
+
+    CGEventRef event = CGEventCreateMouseEvent(NULL, kCGEventLeftMouseUp, aLocation, kCGMouseButtonLeft);
+    CGEventSetIntegerValueField(event, kCGMouseEventClickState, 1);
+    CGEventPost(kCGHIDEventTap, event);
+    CFRelease(event);
+
+    // Reset click tracking so the next performClickAt starts fresh as a single click.
+    self.cursorClickCount = 0;
+    self.timeOfLastClick = [NSDate dateWithTimeIntervalSince1970:0];
+    self.isLeftMouseDown = NO;
+    self.isDraggingCursor = NO;
+}
+
+
 - (void)updateCursorClickCountWithLocation:(CGPoint)aLocation {
     ++self.cursorClickCount;
     
@@ -136,6 +189,7 @@
     
     
     if (self.isLeftMouseDown) {
+        self.isDraggingCursor = YES; // button was already down (from press or prior drag start)
         CGEventRef event = CGEventCreateMouseEvent(NULL, kCGEventLeftMouseDragged, aLocation, kCGMouseButtonLeft);
         CGEventSetIntegerValueField(event, kCGMouseEventClickState, self.cursorClickCount);
         CGEventPost(kCGHIDEventTap, event);
@@ -150,18 +204,20 @@
         CFRelease(event);
         
         self.isLeftMouseDown = YES;
+        self.isDraggingCursor = YES;
     }
 }
 
 
 - (void)stopDraggingCursor {
-    if (self.isLeftMouseDown) {
+    if (self.isDraggingCursor) {
         CGEventRef event = CGEventCreateMouseEvent(NULL, kCGEventLeftMouseUp, [self currentCursorLocation], kCGMouseButtonLeft);
         CGEventSetIntegerValueField(event, kCGMouseEventClickState, self.cursorClickCount);
         CGEventPost(kCGHIDEventTap, event);
         CFRelease(event);
         
         self.isLeftMouseDown = NO;
+        self.isDraggingCursor = NO;
     }
 }
 

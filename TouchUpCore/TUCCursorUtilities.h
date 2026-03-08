@@ -24,6 +24,10 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (void)performClickAt:(CGPoint)aLocation;
 
+- (void)mouseDownAt:(CGPoint)aLocation;
+- (void)mouseUpAt:(CGPoint)aLocation;
+- (void)cancelPressAtLocation:(CGPoint)aLocation;
+
 - (void)performSecondaryClickAt:(CGPoint)aLocation;
 
 - (void)dragCursorTo:(CGPoint)aLocation phase:(NSTouchPhase)phase;

@@ -36,6 +36,7 @@ class TouchUp: NSObject, ObservableObject {
     @Published var isMagnificationEnabled = false
     @Published var isClickWindowToFrontEnabled = false
     @Published var isClickOnLiftEnabled = false
+    @Published var isRestoreCursorAfterClickEnabled = false
     
     
     
@@ -207,7 +208,8 @@ extension TouchUp {
             "isSecondaryClickEnabled" : true,
             "isMagnificationEnabled" : true,
             "isClickWindowToFrontEnabled" : false,
-            "isClickOnLiftEnabled" : false
+            "isClickOnLiftEnabled" : false,
+            "isRestoreCursorAfterClickEnabled" : false
         ])
         
         holdDuration = defaults.double(forKey: "holdDuration")
@@ -221,7 +223,8 @@ extension TouchUp {
             $holdDuration.assign(to: \.holdDuration, on: touchManager),
             $doubleClickDistance.assign(to: \.doubleClickTolerance, on: touchManager),
             $errorResistance.assign(to: \.errorResistance, on: touchManager),
-            $ignoreOriginTouches.assign(to: \.ignoreOriginTouches, on: touchManager)
+            $ignoreOriginTouches.assign(to: \.ignoreOriginTouches, on: touchManager),
+            $isRestoreCursorAfterClickEnabled.assign(to: \.restoreCursorAfterClick, on: touchManager)
         ]
         
         
@@ -231,6 +234,7 @@ extension TouchUp {
         isMagnificationEnabled = defaults.bool(forKey: "isMagnificationEnabled")
         isClickWindowToFrontEnabled = defaults.bool(forKey: "isClickWindowToFrontEnabled")
         isClickOnLiftEnabled = defaults.bool(forKey: "isClickOnLiftEnabled")
+        isRestoreCursorAfterClickEnabled = defaults.bool(forKey: "isRestoreCursorAfterClickEnabled")
     }
     
     
@@ -247,6 +251,7 @@ extension TouchUp {
         defaults.set(isMagnificationEnabled, forKey: "isMagnificationEnabled")
         defaults.set(isClickWindowToFrontEnabled, forKey: "isClickWindowToFrontEnabled")
         defaults.set(isClickOnLiftEnabled, forKey: "isClickOnLiftEnabled")
+        defaults.set(isRestoreCursorAfterClickEnabled, forKey: "isRestoreCursorAfterClickEnabled")
     }
     
 }
@@ -268,16 +273,26 @@ extension TouchUp: TUCTouchDelegate {
     func action(for gesture: TUCCursorGesture) -> TUCCursorAction {
         switch gesture {
         case .TUCCursorGestureTouchDown:
-            return isClickWindowToFrontEnabled ? .moveClickIfNeeded : .move
-            
-        case .TUCCursorGestureTap:
-            return .click
+            if isClickWindowToFrontEnabled { return .moveClickIfNeeded }
+            if isClickOnLiftEnabled { return .move }
+            return .press  // send mouseDown immediately for visual feedback
             
         case .TUCCursorGestureLongPress:
-            return .click
+            return .none  // mouseDown was already sent at TouchDown
+            
+        case .TUCCursorGestureTap:
+            // Quick lift: mouseDown was already sent at TouchDown, just close with mouseUp
+            if isClickWindowToFrontEnabled || isClickOnLiftEnabled { return .click }
+            return .release
+            
+        case .TUCCursorGestureTouchUp:
+            return .release
+            
+        case .TUCCursorGestureScroll:
+            return .scroll
             
         case .TUCCursorGestureDrag:
-            return isClickOnLiftEnabled ? .pointAndClick : (isScrollingWithOneFingerEnabled ? .scroll : .move)
+            return isClickOnLiftEnabled ? .pointAndClick : .move
             
         case .TUCCursorGestureHoldAndDrag:
             return .drag
@@ -346,6 +361,10 @@ extension TouchUp {
         case \.isClickOnLiftEnabled:
             return("Point and click",
                    "Very reduced input set for exhibits: Move cursor by dragging, and click by releasing. Overrides scrolling and dragging functionality.")
+            
+        case \.isRestoreCursorAfterClickEnabled:
+            return("Restore Cursor After Click",
+                   "After tapping the touchscreen, move the cursor back to where it was before. Useful when the mouse cursor position should remain independent from touch interaction.")
             
         case \.holdDuration:
             return("Hold Duration",

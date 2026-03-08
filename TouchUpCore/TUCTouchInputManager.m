@@ -25,6 +25,10 @@
 
 @property TUCCursorGesture identifiedMultitouchGesture;
 
+@property CGPoint preTouchCursorLocation;
+@property CGFloat cursorTouchAccumulatedMovementMM; // total mm moved since touch began
+@property BOOL cursorTouchDidCancelPress; // whether cancelPress was already sent for current touch
+
 @end
 
 
@@ -112,12 +116,40 @@
         self.cursorTouchQualifiedForTap = YES;
         self.cursorTouchDidHold = NO;
         self.cursorTouchStationarySinceDate = nil;
+        self.cursorTouchAccumulatedMovementMM = 0;
+        self.cursorTouchDidCancelPress = NO;
     }
     
     [touch setLocation: point];
     [touch setIsOnSurface:isOnSurface];
     [touch setConfidenceFlag:confidenceFlag];
     [touch setLastUpdated:self.currentFrameID];
+
+    BOOL didUpdateExistingTouch = (touch.previousPhase != NSTouchPhaseEnded && !isNewTouch);
+    BOOL isStationary = YES;
+    if (didUpdateExistingTouch) {
+        // Process movement before handling end-of-touch so the final sample is not lost.
+        CGFloat digitizerRelDistance = sqrt(pow(touch.location.x - touch.previousLocation.x, 2) + pow(touch.location.y - touch.previousLocation.y, 2));
+        CGFloat screenSize = [self touchscreen].physicalSize.width;
+        CGFloat movementMM = digitizerRelDistance * screenSize;
+        isStationary = movementMM < 0.1;
+
+        if (touch.uuid == self.cursorTouch.uuid) {
+            if (!isStationary) {
+                self.cursorTouchQualifiedForTap = NO;
+                self.cursorTouchStationarySinceDate = nil;
+                self.cursorTouchAccumulatedMovementMM += movementMM;
+
+                if (self.cursorTouchAccumulatedMovementMM >= 3.0 && !self.cursorTouchDidCancelPress) {
+                    self.cursorTouchDidCancelPress = YES;
+                    CGPoint location = [self convertScreenPointRelativeToAbsolute:touch.location];
+                    [[TUCCursorUtilities sharedInstance] cancelPressAtLocation:location];
+                }
+            } else if (touch.phase != NSTouchPhaseStationary) {
+                self.cursorTouchStationarySinceDate = [NSDate date];
+            }
+        }
+    }
     
     if (!isOnSurface) {
         [touch setPhase: NSTouchPhaseEnded];
@@ -127,23 +159,7 @@
         
     }
     
-    if(touch.previousPhase != NSTouchPhaseEnded && !isNewTouch) {
-        // update to an existing touch... check if stationary or not
-        CGFloat digitizerRelDistance = sqrt(pow(touch.location.x - touch.previousLocation.x, 2) + pow(touch.location.y - touch.previousLocation.y, 2));
-        CGFloat screenSize = [self touchscreen].physicalSize.width;
-        BOOL isStationary = (digitizerRelDistance * screenSize) < 0.1;
-//        BOOL isStationary = CGPointEqualToPoint(touch.location, touch.previousLocation);
-        
-        if (touch.uuid == self.cursorTouch.uuid) {
-            if (!isStationary) {
-                self.cursorTouchQualifiedForTap = NO;
-                self.cursorTouchStationarySinceDate = nil;
-                
-            } else if (touch.phase !=  NSTouchPhaseStationary) {
-                self.cursorTouchStationarySinceDate = [NSDate date];
-            }
-        }
-        
+    if(didUpdateExistingTouch) {
         [touch setPhase:isStationary ? NSTouchPhaseStationary : NSTouchPhaseMoved];
     }
     
@@ -183,6 +199,7 @@
     
     
     if (phase == NSTouchPhaseBegan) {
+        self.preTouchCursorLocation = [[TUCCursorUtilities sharedInstance] currentCursorLocation];
         [self performMouseEventForGesture:TUCCursorGestureTouchDown];
         return;
     }
@@ -193,9 +210,10 @@
         if (self.cursorTouchStationarySinceDate != nil) {
             holdDuration = [[NSDate date] timeIntervalSinceDate:self.cursorTouchStationarySinceDate];
         }
-        if (self.cursorTouchQualifiedForTap && holdDuration > self.holdDuration) {
+        if (self.cursorTouchQualifiedForTap && holdDuration > self.holdDuration && !self.cursorTouchDidHold) {
             // the user left the finger on the screen for the min duration required to produce a hold
             self.cursorTouchDidHold = YES;
+            // mouseDown was already sent at NSTouchPhaseBegan, nothing to fire here
         }
         
         [self checkForSecondaryClick];
@@ -205,22 +223,26 @@
     
     
     else if (phase == NSTouchPhaseEnded) {
-        if (self.identifiedMultitouchGesture == _TUCCursorGestureNone ) {
-            if (self.cursorTouchDidHold) {
-                [self performMouseEventForGesture:TUCCursorGestureHoldAndDrag];
-            } else if (!self.cursorTouchQualifiedForTap) {
-                [self performMouseEventForGesture:TUCCursorGestureDrag];
+        BOOL hadGesture = (!self.cursorTouchQualifiedForTap)
+            || self.cursorTouchDidHold
+            || (self.identifiedMultitouchGesture != _TUCCursorGestureNone);
+
+        // Strict policy: once a touch has become a gesture, never send click-style release on lift.
+        if (hadGesture) {
+            if (!self.cursorTouchDidCancelPress) {
+                CGPoint loc = [self convertScreenPointRelativeToAbsolute:cursorTouch.location];
+                [[TUCCursorUtilities sharedInstance] cancelPressAtLocation:loc];
+                self.cursorTouchDidCancelPress = YES;
             }
+            [self stopCurrentGesture];
+            return;
         }
-        
+
         [self stopCurrentGesture];
-        
-        if (self.cursorTouchQualifiedForTap) {
+
+        if (self.cursorTouchQualifiedForTap && !self.cursorTouchDidCancelPress) {
+            // quick tap: mouseDown was already sent at TouchDown, close with mouseUp
             [self performMouseEventForGesture:TUCCursorGestureTap];
-        } else {
-            if (self.identifiedMultitouchGesture != _TUCCursorGestureNone) {
-                [self performMouseEventForGesture:self.identifiedMultitouchGesture];
-            }
         }
         
         return;
@@ -288,7 +310,17 @@
     if (self.cursorTouchDidHold) {
         [self performMouseEventForGesture:TUCCursorGestureHoldAndDrag];
     } else {
-        [self performMouseEventForGesture:TUCCursorGestureDrag];
+        // 3 mm is well above digitizer noise (~0.1 mm) but below a real intentional scroll.
+        if (self.cursorTouchAccumulatedMovementMM >= 3.0) {
+            if (!self.cursorTouchDidCancelPress) {
+                self.cursorTouchDidCancelPress = YES;
+                CGPoint loc = [self convertScreenPointRelativeToAbsolute:cursorTouch.location];
+                [[TUCCursorUtilities sharedInstance] cancelPressAtLocation:loc];
+            }
+            [self performMouseEventForGesture:TUCCursorGestureScroll];
+        } else {
+            [self performMouseEventForGesture:TUCCursorGestureDrag];
+        }
     }
 }
 
@@ -335,6 +367,14 @@
     
     TUCCursorAction action = [self actionForGesture:gesture];
     
+    // Absolute suppression: If the touch has already been canceled (converted to scroll/drag),
+    // any subsequent mapping that would result in a Click or Release must be ignored.
+    if (self.cursorTouchDidCancelPress) {
+        if (action == TUCCursorActionClick || action == TUCCursorActionRelease || action == TUCCursorActionMoveClickIfNeeded || action == TUCCursorActionPointAndClick) {
+            return;
+        }
+    }
+    
     CGFloat doubleClickSpan = self.doubleClickTolerance * [[self touchscreen] pixelsPerMM];
     [[TUCCursorUtilities sharedInstance] setDoubleClickTolerance:doubleClickSpan];
     
@@ -350,6 +390,9 @@
             [utils moveCursorTo:screenLocation];
             if ([self isLocationOutsideFrontmostWindow:screenLocation]) {
                 [utils performClickAt:screenLocation];
+                if (self.restoreCursorAfterClick) {
+                    CGWarpMouseCursorPosition(self.preTouchCursorLocation);
+                }
             }
             
             break;
@@ -358,6 +401,9 @@
             [utils moveCursorTo:screenLocation];
             if (touch.phase == NSTouchPhaseEnded) {
                 [utils performClickAt:screenLocation];
+                if (self.restoreCursorAfterClick) {
+                    CGWarpMouseCursorPosition(self.preTouchCursorLocation);
+                }
             }
             break;
             
@@ -367,12 +413,33 @@
             
         case TUCCursorActionClick:
             [utils performClickAt:screenLocation];
+            if (self.restoreCursorAfterClick) {
+                CGWarpMouseCursorPosition(self.preTouchCursorLocation);
+            }
             break;
             
         case TUCCursorActionSecondaryClick:
             [utils performSecondaryClickAt: screenLocation];
             break;
-            
+
+        case TUCCursorActionPress:
+            [utils moveCursorTo:screenLocation];
+            [utils mouseDownAt:screenLocation];
+            break;
+
+        case TUCCursorActionRelease:
+            [utils mouseUpAt:screenLocation];
+            if (self.restoreCursorAfterClick) {
+                CGWarpMouseCursorPosition(self.preTouchCursorLocation);
+            }
+            break;
+
+        case TUCCursorActionCancelPress:
+            // Gesture turned into a drag/scroll — silently release the button
+            // with clickState=0 so no action fires, but visual state resets.
+            [utils cancelPressAtLocation:screenLocation];
+            break;
+
         case TUCCursorActionScroll: {
             CGPoint prevLocation = [self convertScreenPointRelativeToAbsolute:touch.previousLocation];
             CGPoint translation = CGPointMake(screenLocation.x - prevLocation.x,
@@ -410,8 +477,12 @@
         case TUCCursorGestureTwoFingerDrag:     return TUCCursorActionDrag;
             
         case TUCCursorGesturePinch:             return TUCCursorActionMagnify;
+        case TUCCursorGestureTouchUp:           return TUCCursorActionRelease;
+        case TUCCursorGestureScroll:            return TUCCursorActionScroll;
         case _TUCCursorGestureNone:             return TUCCursorActionNone;
     }
+    
+    return TUCCursorActionNone;
 }
 
 

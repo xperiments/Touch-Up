@@ -19,7 +19,9 @@ typedef NS_OPTIONS(NSUInteger, TUCCursorGesture) {
     TUCCursorGestureHoldAndDrag     = 1 << 5,
     TUCCursorGestureTapSecondFinger = 1 << 6,
     TUCCursorGestureTwoFingerDrag   = 1 << 7,
-    TUCCursorGesturePinch           = 1 << 8  // internal: pinch cannot be remapped
+    TUCCursorGesturePinch           = 1 << 8,  // internal: pinch cannot be remapped
+    TUCCursorGestureTouchUp         = 1 << 9,  // touch ended without qualifying as a tap
+    TUCCursorGestureScroll          = 1 << 10  // deliberate scroll/drag gesture
 };
 
 
@@ -32,7 +34,10 @@ typedef NS_ENUM(NSUInteger, TUCCursorAction) {
     TUCCursorActionClick,
     TUCCursorActionSecondaryClick,
     TUCCursorActionScroll,
-    TUCCursorActionMagnify
+    TUCCursorActionMagnify,
+    TUCCursorActionPress,    // mouseDown only
+    TUCCursorActionRelease,  // mouseUp with clickState=1 — fires button action
+    TUCCursorActionCancelPress // mouseUp with clickState=0 — clears visual state, no action fires
 };
 
 
