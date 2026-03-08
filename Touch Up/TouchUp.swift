@@ -243,7 +243,7 @@ extension TouchUp {
         
         defaults.set(holdDuration, forKey: "holdDuration")
         defaults.set(doubleClickDistance, forKey: "doubleClickDistance")
-        defaults.set(errorResistance, forKey: "$errorResistance")
+        defaults.set(errorResistance, forKey: "errorResistance")
         defaults.set(ignoreOriginTouches, forKey: "ignoreOriginTouches")
         
         defaults.set(isScrollingWithOneFingerEnabled, forKey: "isScrollingWithOneFingerEnabled")
@@ -314,7 +314,7 @@ extension TouchUp: TUCTouchDelegate {
     
     
     func touchscreenDidConnect() {
-        self.lastDateScreenAdded = Date()
+        self.lastDateUSBAdded = Date()
         
         if !self.identifyHotPlug() {
             if self.connectionState.isConnected {
@@ -323,6 +323,7 @@ extension TouchUp: TUCTouchDelegate {
         }
         
         self.identifyPreferredOrNoScreen()
+        self.rememeberCues()
     }
     
     func touchscreenDidDisconnect() {

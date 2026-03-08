@@ -161,9 +161,8 @@
     if (durationSinceLastClick > [NSEvent doubleClickInterval] || self.cursorClickCount == 4) {
         self.cursorClickCount = 1;
     }
-    
-    else if ((aLocation.x - self.locationOfLastClick.x) > self.doubleClickTolerance
-             && (aLocation.y - self.locationOfLastClick.y) > self.doubleClickTolerance) {
+    else if (fabs(aLocation.x - self.locationOfLastClick.x) > self.doubleClickTolerance
+             || fabs(aLocation.y - self.locationOfLastClick.y) > self.doubleClickTolerance) {
         // touch is too far away
         self.cursorClickCount = 1;
     }
@@ -297,7 +296,7 @@
         gesturePhase = kCGGesturePhaseChanged;
     }
     
-    CGEventSetIntegerValueField(event, 132, phase);
+    CGEventSetIntegerValueField(event, 132, gesturePhase);
     
     CGEventPost(kCGHIDEventTap, event);
     CFRelease(event);
